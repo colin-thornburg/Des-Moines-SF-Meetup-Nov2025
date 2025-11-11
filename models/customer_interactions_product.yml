@@ -1,0 +1,89 @@
+version: 2
+
+models:
+  - name: customer_interactions_product
+    description: |
+      **Enterprise Data Product: Customer Interactions**
+      
+      This is a governed data product with guaranteed schema stability and freshness SLAs.
+      
+      **SLA**: Data freshness within 5 minutes of source
+      **Owner**: Data Engineering Team
+      **Consumers**: Marketing Analytics, Customer Success, BI Teams
+      
+      This model uses Snowflake Dynamic Tables for continuous refresh and dbt contracts
+      for schema enforcement.
+    
+    config:
+      contract:
+        enforced: true
+    
+    # THE CONTRACT - This is your Avro-like schema definition
+    columns:
+      - name: interaction_id
+        data_type: varchar
+        description: "Unique identifier for each customer interaction event"
+        constraints:
+          - type: not_null
+          - type: unique
+        tests:
+          - unique
+          - not_null
+        
+      - name: customer_id
+        data_type: varchar
+        description: "Identifier for the customer who performed the interaction"
+        constraints:
+          - type: not_null
+        tests:
+          - not_null
+      
+      - name: interaction_timestamp
+        data_type: timestamp_ntz
+        description: "When the interaction occurred (UTC timezone)"
+        constraints:
+          - type: not_null
+        tests:
+          - not_null
+      
+      - name: interaction_type
+        data_type: varchar
+        description: "Type of customer interaction"
+        constraints:
+          - type: not_null
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['purchase', 'support_ticket', 'web_visit', 'app_open', 'call_center']
+        
+      - name: interaction_value_usd
+        data_type: number(18,2)
+        description: "Monetary value of the interaction in USD (null for non-purchase events)"
+        
+      - name: channel
+        data_type: varchar
+        description: "Channel through which the interaction occurred"
+        tests:
+          - accepted_values:
+              values: ['web', 'mobile', 'in_store', 'call_center']
+              config:
+                severity: warn
+      
+      - name: session_id
+        data_type: varchar
+        description: "Session identifier linking related interactions"
+      
+      - name: _metadata_loaded_at
+        data_type: timestamp_ntz
+        description: "When this event was loaded into the raw layer"
+    
+    # Data Product Quality Tests
+    tests:
+      - dbt_utils.recency:
+          datepart: minute
+          field: interaction_timestamp
+          interval: 15
+          config:
+            severity: warn
+            error_if: ">30"
+            warn_if: ">15"

@@ -1,0 +1,154 @@
+-- ================================================================
+-- SETUP: Run this once to create your table and procedure
+-- ================================================================
+
+-- Create the database and schema if needed
+CREATE DATABASE IF NOT EXISTS RAW_DESMOINES_SF_MEETUP;
+CREATE SCHEMA IF NOT EXISTS RAW_DESMOINES_SF_MEETUP.EVENTS;
+
+-- Create the raw events table
+CREATE TABLE IF NOT EXISTS RAW_DESMOINES_SF_MEETUP.EVENTS.customer_interactions (
+    value VARIANT,
+    _metadata_loaded_at TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+-- Create the procedure that generates realistic events
+CREATE OR REPLACE PROCEDURE RAW_DESMOINES_SF_MEETUP.EVENTS.generate_events(num_events FLOAT)
+RETURNS VARCHAR
+LANGUAGE JAVASCRIPT
+AS
+$$
+    // Simple UUID v4 generator for Snowflake JavaScript
+    function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0;
+            var v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+    
+    var interaction_types = ['purchase', 'support_ticket', 'web_visit', 'app_open', 'call_center'];
+    var channels = ['web', 'mobile', 'in_store', 'call_center'];
+    var customer_ids = []; // We'll reuse some customer IDs for realism
+    
+    // Generate a pool of customer IDs to reuse
+    for (var i = 0; i < 50; i++) {
+        customer_ids.push('CUST-' + Math.floor(Math.random() * 9000 + 1000));
+    }
+    
+    var events_generated = 0;
+    
+    for (var i = 0; i < NUM_EVENTS; i++) {
+        // Pick a random customer (with reuse for realistic repeat interactions)
+        var customer_id = customer_ids[Math.floor(Math.random() * customer_ids.length)];
+        
+        // Pick interaction type
+        var type = interaction_types[Math.floor(Math.random() * interaction_types.length)];
+        
+        // Generate value based on type
+        var value_usd = null;
+        if (type === 'purchase') {
+            value_usd = Math.round((Math.random() * 490 + 10) * 100) / 100; // $10-$500
+        } else if (type === 'support_ticket') {
+            value_usd = 0.00;
+        }
+        
+        // Pick channel
+        var channel = channels[Math.floor(Math.random() * channels.length)];
+        
+        // Generate timestamp - random time in the last 6 hours for recent data
+        var minutes_ago = Math.floor(Math.random() * 360); // 0-360 minutes ago
+        var timestamp = new Date(Date.now() - (minutes_ago * 60 * 1000));
+        
+        // Build the event object
+        var event = {
+            interaction_id: generateUUID(),
+            customer_id: customer_id,
+            timestamp: timestamp.toISOString(),
+            type: type,
+            value_usd: value_usd,
+            channel: channel,
+            session_id: generateUUID()
+        };
+        
+        // Insert the event
+        try {
+            snowflake.execute({
+                sqlText: `INSERT INTO RAW_DESMOINES_SF_MEETUP.EVENTS.customer_interactions (value, _metadata_loaded_at) 
+                          SELECT PARSE_JSON(:1), CURRENT_TIMESTAMP()`,
+                binds: [JSON.stringify(event)]
+            });
+            events_generated++;
+        } catch (err) {
+            return 'Error inserting event: ' + err;
+        }
+    }
+    
+    return 'Successfully generated ' + events_generated + ' events';
+$$;
+
+-- ================================================================
+-- USAGE: Run these whenever you want to add data
+-- ================================================================
+
+-- Add 20 events (good for initial setup)
+CALL RAW_DESMOINES_SF_MEETUP.EVENTS.generate_events(20);
+
+-- Add 10 more events (during demo when you want fresh data)
+-- CALL RAW_DESMOINES_SF_MEETUP.EVENTS.generate_events(10);
+
+-- Add just 5 events (quick refresh)
+-- CALL RAW_DESMOINES_SF_MEETUP.EVENTS.generate_events(5);
+
+-- ================================================================
+-- VERIFICATION: Check your data
+-- ================================================================
+
+-- See total count and recent activity
+SELECT 
+    COUNT(*) as total_events,
+    COUNT(DISTINCT value:customer_id::VARCHAR) as unique_customers,
+    MIN(_metadata_loaded_at) as oldest_load,
+    MAX(_metadata_loaded_at) as newest_load,
+    DATEDIFF('minute', MIN(_metadata_loaded_at), MAX(_metadata_loaded_at)) as span_minutes
+FROM RAW_DESMOINES_SF_MEETUP.EVENTS.customer_interactions;
+
+-- Break down by interaction type
+SELECT 
+    value:type::VARCHAR as interaction_type,
+    COUNT(*) as count,
+    ROUND(AVG(value:value_usd::FLOAT), 2) as avg_value,
+    SUM(value:value_usd::FLOAT) as total_value
+FROM RAW_DESMOINES_SF_MEETUP.EVENTS.customer_interactions
+GROUP BY value:type
+ORDER BY count DESC;
+
+-- View the most recent 5 events
+SELECT 
+    value:interaction_id::VARCHAR as interaction_id,
+    value:customer_id::VARCHAR as customer_id,
+    value:timestamp::TIMESTAMP as interaction_time,
+    value:type::VARCHAR as type,
+    value:value_usd::FLOAT as value_usd,
+    value:channel::VARCHAR as channel,
+    _metadata_loaded_at
+FROM RAW_DESMOINES_SF_MEETUP.EVENTS.customer_interactions
+ORDER BY _metadata_loaded_at DESC
+LIMIT 5;
+
+-- See the full JSON structure of recent events
+SELECT value 
+FROM RAW_DESMOINES_SF_MEETUP.EVENTS.customer_interactions 
+ORDER BY _metadata_loaded_at DESC
+LIMIT 3;
+
+-- ================================================================
+-- CLEANUP: Use if you want to start fresh
+-- ================================================================
+
+-- Clear all data (keep table structure)
+-- TRUNCATE TABLE RAW_DESMOINES_SF_MEETUP.EVENTS.customer_interactions;
+
+-- Drop everything
+-- DROP TABLE IF EXISTS RAW_DESMOINES_SF_MEETUP.EVENTS.customer_interactions;
+-- DROP PROCEDURE IF EXISTS RAW_DESMOINES_SF_MEETUP.EVENTS.generate_events(FLOAT);

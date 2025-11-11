@@ -1,0 +1,16 @@
+version: 2
+
+sources:
+  - name: raw_desmoines_sf_meetup
+    database: raw_desmoines_sf_meetup
+    schema: events
+    description: "Raw event data from customer interactions"
+    
+    tables:
+      - name: customer_interactions
+        description: "Raw customer interaction events in JSON format"
+        columns:
+          - name: value
+            description: "JSON payload containing interaction details"
+          - name: _metadata_loaded_at
+            description: "Timestamp when the event was loaded into Snowflake"
