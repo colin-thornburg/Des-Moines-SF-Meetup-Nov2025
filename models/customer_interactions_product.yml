@@ -15,6 +15,7 @@ models:
       for schema enforcement.
     
     config:
+      access: public
       contract:
         enforced: true
     
