@@ -1,6 +1,12 @@
 {{
   config(
-    materialized='table'
+    materialized='dynamic_table',
+    snowflake_warehouse='transforming',
+    target_lag='downstream',
+    on_configuration_change='apply',
+    post_hook=[
+      "ALTER DYNAMIC TABLE {{ this }} REFRESH"
+    ]
   )
 }}
 
